@@ -11,3 +11,6 @@ venv/
 
 # Streamlit local config (not needed for deployment)
 .streamlit/secrets.toml
+
+# Claude Code local config (IDE tooling, not needed for deployment)
+.claude/
