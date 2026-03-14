@@ -182,7 +182,49 @@ def load_data():
 df_agg, df_country, df_time, df_comments = load_data()
 
 # =============================================================================
-# STEP 4 — HEADER
+# STEP 4 — SIDEBAR DATE FILTER
+#
+# st.sidebar.*  renders widgets in the collapsible left sidebar.
+# st.date_input with value=(start, end) returns a tuple when the user picks
+# a range. We guard against the in-between state where only one date is chosen.
+#
+# The filter applies to df_time → affects:
+#   • Channel Growth Over Time chart (Tab 1)
+#   • Daily Views Over Time chart (Tab 2)
+# KPI cards always show all-time totals regardless of the filter.
+# =============================================================================
+st.sidebar.header("Filters")
+st.sidebar.markdown("Applies to time-series charts.")
+
+_min_date = df_time["date"].min().date()
+_max_date = df_time["date"].max().date()
+
+date_range = st.sidebar.date_input(
+    "Date range",
+    value=(_min_date, _max_date),
+    min_value=_min_date,
+    max_value=_max_date,
+)
+
+# Guard: date_input returns a 1-tuple while the user is mid-selection
+if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+    start_date, end_date = date_range
+else:
+    start_date, end_date = _min_date, _max_date
+
+df_time_filtered = df_time[
+    (df_time["date"].dt.date >= start_date) &
+    (df_time["date"].dt.date <= end_date)
+]
+
+st.sidebar.divider()
+st.sidebar.caption(
+    f"Showing **{df_time_filtered['date'].dt.date.nunique():,}** days  "
+    f"({start_date.strftime('%b %d %Y')} → {end_date.strftime('%b %d %Y')})"
+)
+
+# =============================================================================
+# STEP 5 — HEADER
 # st.title()    → large H1-style heading
 # st.markdown() → any markdown text (bold, italic, links, etc.)
 # =============================================================================
@@ -302,6 +344,48 @@ with tab1:
         },
     )
 
+    st.divider()
+
+    # ── Channel growth over time ───────────────────────────────────────────────
+    # Aggregate df_time_filtered across ALL videos per day, then cumsum.
+    # This shows how the channel has grown over the selected date window.
+    st.subheader("Channel Growth Over Time")
+    st.caption("Uses the date range set in the sidebar.")
+
+    daily = (
+        df_time_filtered
+        .groupby("date", as_index=False)
+        .agg(
+            views           = ("views",                "sum"),
+            subs_gained     = ("subscriptions_added",  "sum"),
+            subs_lost       = ("subscriptions_removed","sum"),
+        )
+        .sort_values("date")
+    )
+    daily["cumulative_views"] = daily["views"].cumsum()
+    daily["cumulative_subs"]  = (daily["subs_gained"] - daily["subs_lost"]).cumsum()
+
+    growth_metric = st.radio(
+        "Metric:",
+        options=["cumulative_views", "cumulative_subs"],
+        format_func=lambda x: {
+            "cumulative_views": "Cumulative Views",
+            "cumulative_subs":  "Cumulative Subscribers",
+        }[x],
+        horizontal=True,
+        key="growth_metric_radio",
+    )
+
+    y_label = "Cumulative Views" if growth_metric == "cumulative_views" else "Cumulative Subscribers"
+    fig_growth = px.line(
+        daily, x="date", y=growth_metric,
+        labels={"date": "Date", growth_metric: y_label},
+    )
+    fig_growth.update_traces(line_color="#E50914", fill="tozeroy",
+                             fillcolor="rgba(229,9,20,0.08)")
+    fig_growth.update_layout(height=380, margin=dict(l=0, r=10, t=10, b=10))
+    st.plotly_chart(fig_growth, use_container_width=True)
+
 
 # =============================================================================
 # TAB 2 — INDIVIDUAL VIDEO DEEP-DIVE
@@ -339,7 +423,7 @@ with tab2:
         st.subheader("Daily Views Over Time")
 
         vid_time = (
-            df_time[df_time["video_id"] == vid_id]
+            df_time_filtered[df_time_filtered["video_id"] == vid_id]
             .sort_values("date")
         )
 
